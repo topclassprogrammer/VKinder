@@ -4,28 +4,29 @@ from sqlalchemy.orm import relationship
 from const import Base
 
 
-class User(Base):
-    __tablename__ = 'users'
-    user_id = Column(Integer, primary_key=True)
-    user_profile = Column(Integer, nullable=False)
-    preference = relationship('PreferencesUsers', back_populates='user')
+class Users(Base):
+    __tablename__ = 'user'
+    id_vk = sq.Column(sq.Integer, primary_key=True)
+    name = sq.Column(sq.String(length=60), nullable=False)
+    surname = sq.Column(sq.String(length=60), nullable=False)
+    sex = sq.Column(sq.String(length=15), nullable=False)
+    age = sq.Column(sq.Integer, nullable=False)
+    city = sq.Column(sq.String(length=75), nullable=False)
+    link_to_profile = sq.Column(sq.String(length=150), unique=True)
 
 
-class PreferencesUsers(Base):
-    __tablename__ = 'preferences_users'
-    user_id = Column(Integer, ForeignKey('users.user_id'), primary_key=True)
-    preference_id = Column(Integer, ForeignKey('preferences.preference_id'),
-                           primary_key=True)
-    user = relationship('User', back_populates='preference')
-    preference = relationship('Preferences', back_populates='user')
+class Black_list(Base):
+    __tablename__ = 'blacklist'
+    id = sq.Column(sq.Integer, primary_key=True)
+    user_id = sq.Column(sq.Integer, sq.ForeignKey("user.id_vk"), nullable=False)
+    user_bl_id = sq.Column(sq.Integer, sq.ForeignKey("user.id_vk"), nullable=False)
 
 
-class Preferences(Base):
-    __tablename__ = 'preferences'
-    preference_id = Column(Integer, primary_key=True)
-    favourite_profile = Column(Integer)
-    black_profile = Column(Integer)
-    user = relationship('PreferencesUsers', back_populates='preference')
+class Favorite_list(Base):
+    __tablename__ = 'favoritelist'
+    id = sq.Column(sq.Integer, primary_key=True)
+    user_id = sq.Column(sq.Integer, sq.ForeignKey("user.id_vk"), nullable=False)
+    user_fav_id = sq.Column(sq.Integer, sq.ForeignKey("user.id_vk"), nullable=False)
 
 
 def create_tables(engine):
