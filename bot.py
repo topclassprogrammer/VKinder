@@ -24,12 +24,13 @@ class Vkinder:
     def user_info_message(self, user_info, keyboard=None):
         user_name = user_info.get('first_name', '')
         user_last_name = user_info.get('last_name', '')
-        user_sex = user_info.get('sex', '')
-        user_sex_str = "мужской" if user_sex == 2 else "женский" if user_sex == 1 else "не указан"
-        user_city = user_info.get('city', {}).get('title', '')
+        self.user_sex = user_info.get('sex', '')
+        user_sex_str = "мужской" if self.user_sex == 2 else "женский" if self.user_sex == 1 else "не указан"
+        self.user_city = user_info.get('city', {}).get('title', '')
+        self.user_city_id = user_info.get('city', {}).get('id', '')
         user_relation = user_info.get('relation', '')
         user_bdate = user_info.get('bdate', '')
-        user_age = self.calculate_age(user_bdate)
+        self.user_age = self.calculate_age(user_bdate)
 
         if user_relation is not None:
             relation_mapping = {
@@ -72,9 +73,49 @@ class Vkinder:
         keyboard.add_button('Чёрный список', color=VkKeyboardColor.POSITIVE)
         return keyboard
 
+    def send_photo(self, user_id, photos):
+        # Отправить фотографию пользователю
+        for photo in photos:
+            random_id = uuid.uuid4().int & (1 << 32) - 1
+            self.vk.messages.send(user_id=user_id, random_id=random_id, attachment=photo)
+
+    def get_top_liked_photos(self, user_id):
+        vk_session = vk_api.VkApi(token=USER_TOKEN)
+        vk = vk_session.get_api()
+        photos_response = vk.photos.get(owner_id=user_id, album_id='profile', rev=1, count=100, extended=1)
+        photos = photos_response['items']
+        # Сортировать фотографии по количеству лайков
+        sorted_photos = sorted(photos, key=lambda x: -x['likes']['count'])
+        # Вернуть топ-3 фотографии
+        top_photos = sorted_photos[:3]
+        top_url_photos = [el['sizes'][-1]['url'] for el in top_photos]
+        return top_url_photos
+
     def search_button_response(self, user_id):
-        message = "Напишите интересующий вас диапазон возраста, пол, город, в котором проживает человек и его семейное положение"
+        vk_session = vk_api.VkApi(token=USER_TOKEN)
+        vk = vk_session.get_api()
+
+        if self.user_sex == 1:
+            opposite_sex = 2
+        elif self.user_sex == 2:
+            opposite_sex = 1
+        else:
+            opposite_sex = 3
+
+        while True:
+            search_res = vk.users.search(sex=opposite_sex, age_from=self.user_age, age_to=self.user_age, city=self.user_city_id, has_photo=1, count=1000)
+            random_id = random.randrange(len(search_res['items']))
+            # Выходим из цикла, если профиль не закрыт
+            if search_res['items'][random_id]['is_closed'] is False:
+                break
+        name = search_res['items'][random_id]['first_name']
+        last_name = search_res['items'][random_id]['last_name']
+        target_id = search_res['items'][random_id]['id']
+        link_to_profile = 'vk.com/id' + str(target_id)
+        message = f'{name} {last_name}\n{link_to_profile}'
         self.write_msg(user_id, message)
+        top_url_photos = self.get_top_liked_photos(target_id)
+        self.send_photo(user_id, top_url_photos)
 
     # def favorite_contacts_button_response(self, user_id):
     #     # Получаем ID пользователя
@@ -93,29 +134,9 @@ class Vkinder:
     #         message = "У вас нет фотографий"
     #         self.write_msg(user_id, message)
 
-    # def get_top_liked_photos(self, user_id):
-    #     # Получить все фотографии пользователя через сообщество
-    #     photos_response = self.vk.photos.get(owner_id=user_id, album_id='profile', rev=1, count=100)
-    #     photos = photos_response['items']
-    #
-    #     # Сортировать фотографии по количеству лайков
-    #     sorted_photos = sorted(photos, key=lambda x: -x['likes']['count'])
-    #
-    #     # Вернуть топ-3 фотографии
-    #     top_photos = sorted_photos[:3]
-    #
-    #     return top_photos
-
-    # def send_photo(self, user_id, photo):
-    #     # Отправить фотографию пользователю
-    #     photo_url = photo['sizes'][-1]['url']
-    #     self.vk.messages.send(user_id=user_id, attachment=photo_url)
-
 
 if __name__ == '__main__':
-    vkinder = Vkinder(token_vk.token_vk)
-    while True:
-        time.sleep(5)
+    vkinder = Vkinder(GROUP_TOKEN)
         for event in vkinder.longpoll.listen():
             if event.type == VkEventType.MESSAGE_NEW and event.to_me:
                 response = event.text.lower()
