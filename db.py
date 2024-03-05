@@ -19,12 +19,13 @@ def create_db():
     else:
         return engine
 
-# Регистрация пользователя
+# Регистрация пользователя при условии, что пользователю есть 18 лет
 def register_user(vk_id, name, surname, sex, age, city, link_to_profile):
     try:
         new_user = Users(vk_id=vk_id, name=name, surname=surname, sex=sex, age=age, city=city,
                          link_to_profile=link_to_profile)
-        if Users(sex) < 18:
+        users_info = Users.get(vk_id)
+        if users_info.age >= 18:
             session.add(new_user)
             session.commit()
             return True
@@ -56,12 +57,12 @@ def delete_db_elit(id):
     session.commit()
 
 # Удаляет Userа из черного списка
-def delet_db_black(ids):
+def delet_db_black(id):
     current_user = session.query(Black_list).filter_by(vk_id=id).first()
     session.delete(current_user)
     session.commit()
     
-#8 Пишем сообщение пользователю
+# Пишем сообщение пользователю
 def write_msg(user_id, message, attachment=None):
     vk.method('messages.send',
               {'user_id': user_id,
@@ -84,9 +85,6 @@ def add_to_black_list(event_id, vk_id):
         write_msg(event_id,
                   'Пользователь уже в черном списке.')
         return False
-
-if __name__ == '__main__':
-    Base.metadata.create_all(engine)
 
 
 if __name__ == '__main__':
