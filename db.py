@@ -1,16 +1,17 @@
 import datetime
+import random
 import sys
 
 from sqlalchemy import create_engine, exc, insert
-from sqlalchemy.exc import InvalidRequestError, IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy_utils import database_exists, create_database
 
 from const import PROTOCOL, USER, PASSWORD, HOST, PORT, DB_NAME
-from models import create_tables, VkUsers, VkBotUsers, BotUsers, BotUsersFavourites, Favourites, BotUsersBlackLists, BlackLists
+from models import create_tables, Search, Bot, BotSearch
 
 
 def create_db():
+    """Создаем БД"""
     try:
         dsn = f"{PROTOCOL}://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}"
         engine = create_engine(dsn)
@@ -23,109 +24,182 @@ def create_db():
         return engine
 
 
-# Вносим пользователя бота в БД (без returning и возврата BotUsers.bot_user_id)
-def register_bot_user(sex, age, city_id, vk_id, table_update_time):
-    new_user = BotUsers(sex=sex, age=age, city_id=city_id, vk_id=vk_id, table_update_time=table_update_time)
+def register_bot_user(sex, age, city_id, profile, update_time):
+    """Вносим пользователя бота в БД"""
+    new_user = Bot(sex=sex, age=age, city_id=city_id, profile=profile, update_time=update_time)
     if age >= 18:
         with Session() as session:
             session.add(new_user)
             session.commit()
 
 
-# Проверка наличия пользователя бота в БД
-def check_reg(vk_id):
+def check_reg(profile):
+    """Проверяем наличие пользователя бота в БД"""
     with Session() as session:
-        vk_user_id = session.query(VkUsers.vk_user_id).filter(VkUsers.vk_user_id == vk_id).first()[0]
-        return vk_user_id
+        bot_id = session.query(Bot.bot_id).filter(Bot.profile == profile).first()[0]
+        return bot_id
 
 
-# Получаем дату записи в таблице пользователя бота
-def get_bot_user_update_time(vk_id):
+def get_bot_update_time(profile):
+    """Получаем дату последнего обновления пользователя бота"""
     with Session() as session:
-        bot_datetime = session.query(BotUsers.table_update_time).filter(BotUsers.vk_id == vk_id).first()
-        if bot_datetime:
-            return bot_datetime[0]
+        bot_update_time = session.query(Bot.update_time).filter(Bot.profile == profile).first()
+        if bot_update_time:
+            return bot_update_time[0]
 
 
-# Обновляем дату записи в таблице пользователя бота
-def update_bot_data(sex, age, city, vk_id):
-    bot_user_update_time = get_bot_user_update_time(vk_id)
-    if bot_user_update_time:
-        next_period = bot_user_update_time + datetime.timedelta(days=1.0)
+def check_if_update_needs(profile):
+    """Проверяем наступил ли период для обновления данных в БД"""
+    bot_update_time = get_bot_update_time(profile)
+    next_period = bot_update_time + datetime.timedelta(days=30.0)
+    current_datetime = datetime.datetime.now()
+    if next_period < current_datetime:
+        return True
+
+
+def update_bot_and_search(sex, age, city_id, profile):
+    """Обновляем записи в таблице пользователя бота(Bot) и в таблице найденных пользователей(Search),
+    если наступил период обновления"""
+    if check_if_update_needs(profile):
         current_datetime = datetime.datetime.now()
-        if next_period < current_datetime:
-            with Session() as session:
-                session.query(BotUsers).filter(BotUsers.vk_id == vk_id).update({'sex': sex, 'age': age, 'city': city, 'table_update_time': current_datetime})
-                session.commit()
+        with Session() as session:
+            session.query(Bot).filter(Bot.profile == profile).update(
+                {'sex': sex, 'age': age, 'city_id': city_id, 'update_time': current_datetime})
+            search_ids = [el[0] for el in get_search_ids()]
+            session.query(Search).filter(Search.search_id.in_(search_ids)).delete()
+            session.commit()
+            return True
 
 
-# Добавляем в БД записи о найденных пользователей ВК на основании информации из анкеты пользователя бота
-def create_vk_users_rows(first_name, last_name, vk_id, top_url_photos):
+def get_search_ids():
+    """Находим какие строчки с первичным ключом в таблице Search относятся к таблице Bot
+    через промежуточную таблицу BotSearch"""
     with Session() as session:
-        vk_user_row = session.execute(insert(VkUsers).returning(VkUsers.vk_user_id), [{
-            'first_name': first_name, 'last_name': last_name, 'vk_id': vk_id,
-            'link_to_photo_1': top_url_photos[0],
-            'link_to_photo_2': top_url_photos[1] if len(top_url_photos) > 1 else None,
-            'link_to_photo_3': top_url_photos[2] if len(top_url_photos) > 2 else None,
-            'table_update_time': datetime.datetime.now()}])
+        return session.query(Search.search_id).join(BotSearch).join(Bot).filter(Bot.bot_id == BotSearch.bot_id).all()
+
+
+def create_row_in_search_table(first_name, last_name, profile, top_url_photos):
+    """Добавляем в таблицу Search найденных пользователей на основании информации из анкеты пользователя бота"""
+    with Session() as session:
+        search_row = session.execute(insert(Search).returning(Search.search_id), [{
+            'first_name': first_name, 'last_name': last_name, 'profile': profile,
+            'photo_1': top_url_photos[0],
+            'photo_2': top_url_photos[1] if len(top_url_photos) > 1 else None,
+            'photo_3': top_url_photos[2] if len(top_url_photos) > 2 else None}])
         session.commit()
-        return vk_user_row.fetchone()[0]
+        return search_row.fetchone()[0]
 
 
-# # Проверка пользователя в избранном
-# def check_favourite_list(vk_id):
-#     with Session() as session:
-#         current_user_id = session.query(Users.vk_id).filter_by(vk_id=vk_id).first()[0]
-#         all_users = session.query(Preferences.favourite_vk_id).filter_by(favourite_vk_id=vk_id).all()
-#     return all_users
-#
-#
-# # Проверка пользователя в черном списке
-# def check_black_list(vk_id):
-#     with Session() as session:
-#         current_user_id = session.query(Users.vk_id).filter_by(vk_id=vk_id).first()[0]
-#         all_users = session.query(Preferences.black_vk_id).filter_by(user_id=current_user_id.id).all()
-#     return all_users
-#
-#
-# # Удаляет Userа из избранного
-# def delete_db_elit(id):
-#     current_user = session.query(Favorite_list).filter_by(vk_id=id).first()
-#     session.delete(current_user)
-#     session.commit()
-#
-#
-# # Удаляет Userа из черного списка
-# def delet_db_black(ids):
-#     current_user = session.query(Black_list).filter_by(vk_id=id).first()
-#     session.delete(current_user)
-#     session.commit()
-#
-#
-# #8 Пишем сообщение пользователю
-# def write_msg(user_id, message, attachment=None):
-#     vk.method('messages.send',
-#               {'user_id': user_id,
-#                'message': message,
-#                'random_id': randrange(10 ** 7),
-#                'attachment': attachment})
-#
-#
-# # Добавление пользователя в черный список
-# def add_to_black_list(event_id, vk_id):
-#     try:
-#         new_user = Black_list(
-#             vk_id=vk_id
-#         )
-#         session.add(new_user)
-#         session.commit()
-#         write_msg(event_id,
-#                   'Пользователь заблокирован.')
-#         return True
-#     except (IntegrityError, InvalidRequestError):
-#         write_msg(event_id,
-#                   'Пользователь уже в черном списке.')
-#         return False
+def create_row_in_bot_search_table(search_id, profile):
+    """Вносим записи в промежуточную таблицу BotSearch для связи многие-ко-многим"""
+    with Session() as session:
+        bot_id = check_reg(profile)
+        bot_search_row = BotSearch(bot_id=bot_id, search_id=search_id)
+        session.add(bot_search_row)
+        session.commit()
+
+
+def get_random_search_id():
+    """Получаем случайный первичный ключ из таблицы найденных пользователей"""
+    search_ids = get_search_ids()
+    flat_search_ids = [el[0] for el in search_ids]
+    random_search_id = random.choice(flat_search_ids)
+    return random_search_id
+
+
+def get_random_search_row():
+    """Получаем случайную запись, которой нет в черном списке, среди найденных пользователей"""
+    random_search_id = get_random_search_id()
+    while check_if_user_in_black_list(random_search_id):
+        random_search_id = get_random_search_id()
+    with Session() as session:
+        return session.query(Search.search_id, Search.first_name, Search.last_name,
+                     Search.profile, Search.photo_1, Search.photo_2,
+                     Search.photo_3).filter(Search.search_id == random_search_id).first()
+
+
+def get_favourite_list():
+    """Получаем содержимое списка избранных"""
+    with Session() as session:
+        return session.query(Search.search_id, Search.first_name, Search.last_name,
+                             Search.profile, Search.photo_1, Search.photo_2,
+                             Search.photo_3).filter(Search.is_in_favourite_list).all()
+
+
+def check_if_user_in_favourite_list(search_id):
+    """Проверяем есть ли в списке избранных предлагаемый пользователь в чате"""
+    with Session() as session:
+        return session.query(Search.is_in_favourite_list).filter(Search.search_id == search_id).first()[0]
+
+
+def add_to_db_favourite_list(search_id):
+    """Добавляем пользователя в список избранных"""
+    with Session() as session:
+        if check_if_user_in_favourite_list(search_id):
+            return False
+        else:
+            session.query(Search).filter(Search.search_id == search_id).update({'is_in_favourite_list': True})
+            session.commit()
+            return True
+
+
+def find_search_id_by_profile(profile):
+    """Находим по ID анкете среди найденных пользователей в этой же таблице
+     соответствующий ему первичный ключ"""
+    search_ids = get_search_ids()
+    with Session() as session:
+        search_id = session.query(Search.search_id).filter(Search.profile == profile).first()
+        if search_id is not None and (search_id[0],) in search_ids:
+            return search_id
+
+
+def remove_in_db_favourite_list(profile):
+    """Удаляем пользователя из списка избранных"""
+    with Session() as session:
+        search_id = find_search_id_by_profile(profile)
+        if search_id:
+            session.query(Search).filter(Search.search_id == search_id[0]).update({'is_in_favourite_list': False})
+            session.commit()
+            return True
+        else:
+            return False
+
+
+def get_black_list():
+    """Получаем содержимое черного списка"""
+    with Session() as session:
+        return session.query(Search.search_id, Search.first_name, Search.last_name,
+                             Search.profile, Search.photo_1, Search.photo_2,
+                             Search.photo_3).filter(Search.is_in_black_list).all()
+
+
+def check_if_user_in_black_list(search_id):
+    """Проверяем есть ли в черном списке предлагаемый пользователь в чате"""
+    with Session() as session:
+        return session.query(Search.is_in_black_list).filter(Search.search_id == search_id).first()[0]
+
+
+def add_to_db_black_list(search_id):
+    """Добавляем пользователя в черный список"""
+    with Session() as session:
+        if check_if_user_in_black_list(search_id):
+            return False
+        else:
+            session.query(Search).filter(Search.search_id == search_id).update({'is_in_black_list': True})
+            session.commit()
+            return True
+
+
+def remove_in_db_black_list(profile):
+    """Удаляем пользователя из черного списка"""
+    with Session() as session:
+        search_id = find_search_id_by_profile(profile)
+        if search_id:
+            session.query(Search).filter(Search.search_id == search_id[0]).update({'is_in_black_list': False})
+            session.commit()
+            return True
+        else:
+            return False
 
 
 engine = create_db()
