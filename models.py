@@ -5,7 +5,15 @@ from const import Base
 
 
 class Bot(Base):
-    """Таблица пользователей бота"""
+    
+    """Таблица с информацией о пользователях бота.
+    bot_id - идентификатор VK,
+    sex - пол,
+    age - возраст,
+    city_id - идентификатор города,
+    profile - идентификатор профиля в VK,
+    update_time -  время последнего обновления информации о пользователе"""
+    
     __tablename__ = 'bot'
     bot_id = sq.Column(sq.Integer, primary_key=True)
     sex = sq.Column(sq.String(15), nullable=False)
@@ -43,5 +51,6 @@ class Search(Base):
 
 
 def create_tables(engine):
+    """ Метод создания и удаления таблиц БД """
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
