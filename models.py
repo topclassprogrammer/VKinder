@@ -5,15 +5,7 @@ from const import Base
 
 
 class Bot(Base):
-    
-    """Таблица с информацией о пользователях бота.
-    bot_id - идентификатор VK,
-    sex - пол,
-    age - возраст,
-    city_id - идентификатор города,
-    profile - идентификатор профиля в VK,
-    update_time -  время последнего обновления информации о пользователе"""
-    
+    """Таблица пользователей бота"""
     __tablename__ = 'bot'
     bot_id = sq.Column(sq.Integer, primary_key=True)
     sex = sq.Column(sq.String(15), nullable=False)
@@ -25,12 +17,14 @@ class Bot(Base):
 
 
 class BotSearch(Base):
-    """Промежуточная таблица при отношении многие-ко-многим для связи пользователей бота
-     и найденных результатов ботом"""
+    """Промежуточная таблица при отношении многие-ко-многим для связи
+     пользователей бота и найденных результатов ботом"""
     __tablename__ = 'bot_search'
     bot_search_id = sq.Column(sq.Integer, primary_key=True)
-    bot_id = sq.Column(sq.Integer, sq.ForeignKey('bot.bot_id', ondelete="CASCADE"))
-    search_id = sq.Column(sq.Integer, sq.ForeignKey('search.search_id', ondelete="CASCADE"))
+    bot_id = sq.Column(sq.Integer, sq.ForeignKey('bot.bot_id',
+                                                 ondelete="CASCADE"))
+    search_id = sq.Column(sq.Integer, sq.ForeignKey('search.search_id',
+                                                    ondelete="CASCADE"))
     search = relationship('Search', back_populates='bot')
     bot = relationship('Bot', back_populates='search')
 
@@ -51,6 +45,5 @@ class Search(Base):
 
 
 def create_tables(engine):
-    """ Метод создания и удаления таблиц БД """
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
