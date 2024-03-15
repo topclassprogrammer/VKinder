@@ -2,8 +2,8 @@ import datetime
 import uuid
 
 import vk_api
-from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+from vk_api.longpoll import VkLongPoll, VkEventType
 
 from const import GROUP_TOKEN, USER_TOKEN
 from db import register_bot_user, create_row_in_search_table, \
@@ -20,7 +20,9 @@ class Vkinder:
         self.vk_session = vk_api.VkApi(token=group_token)
         self.vk = self.vk_session.get_api()
         self.longpoll = VkLongPoll(self.vk_session)
-        self.db_update_percent = 100
+        self.db_update_percent = 100  # Отсчет от 100 до 0 при заполнении базы
+        self.register = False  # Флаг регистрации в базе
+        self.state = None  # Флаг нахождения бота в конкретном меню
 
     def send_message(self, user_id, message, keyboard=None):
         """Отправляем сообщение в чат"""
@@ -39,6 +41,13 @@ class Vkinder:
             random_id = uuid.uuid4().int
             self.vk.messages.send(user_id=user_id, random_id=random_id,
                                   attachment=photo)
+
+    def check_age(self, user_id):
+        fields = ['sex', 'city', 'bdate']
+        bot_info = self.vk.users.get(user_ids=user_id, fields=fields)[0]
+        bot_bdate = bot_info.get('bdate', '')
+        user_age = self.calculate_age(bot_bdate)
+        return user_age
 
     def get_bot_info(self, user_id, keyboard=None):
         """Получаем информацию из анкеты пользователя бота"""
@@ -75,21 +84,20 @@ class Vkinder:
                             color=VkKeyboardColor.PRIMARY)
         return keyboard
 
-    @staticmethod
-    def get_keyboard_for_preferences(state):
+    def get_keyboard_for_preferences(self):
         """Клавиатура в меню предпочтений бота"""
         keyboard = VkKeyboard()
         keyboard.add_button(
             "Добавить в "
-            f"{'избранные' if state == 'favourite_list' else 'черный список'}",
+            f"{'избранные' if self.state == 'favourite_list' else 'черный список'}",
             color=VkKeyboardColor.POSITIVE)
         keyboard.add_button(
             "Удалить из "
-            f"{'избранных' if state == 'favourite_list' else 'черного списка'}",
+            f"{'избранных' if self.state == 'favourite_list' else 'черного списка'}",
             color=VkKeyboardColor.NEGATIVE)
         keyboard.add_line()
         keyboard.add_button(
-            'Список избранных' if state == 'favourite_list' else 'Черный список',
+            'Список избранных' if self.state == 'favourite_list' else 'Черный список',
             color=VkKeyboardColor.PRIMARY)
         keyboard.add_button('Назад', color=VkKeyboardColor.SECONDARY)
         return keyboard
@@ -130,10 +138,14 @@ class Vkinder:
         if check_if_user_in_black_list(search_id):
             message = 'Невозможно добавить пользователя в список избранных '
             'пока он присутствует в черном списке'
+        elif add_to_db_favourite_list(search_id) is None:
+            message = ('Доступ к списку избранных невозможен '
+                       'до тех пор пока не будет найден '
+                       'хотя бы один пользователь')
+        elif add_to_db_favourite_list(search_id) is False:
+            message = 'Пользователь уже был ранее добавлен в список избранных'
         elif add_to_db_favourite_list(search_id):
             message = 'Пользователь добавлен в список избранных'
-        else:
-            message = 'Пользователь уже был ранее добавлен в список избранных'
         self.send_message(user_id, message=message)
 
     def show_favourite_list(self, user_id):
@@ -163,18 +175,22 @@ class Vkinder:
     def add_to_black_list(self, user_id, search_id):
         """Добавляем анкету в черный список"""
         if check_if_user_in_favourite_list(search_id):
-            message = ('Невозможно добавить пользователя в черный список пока '
-                       'он присутствует в списке избранных')
+            message = 'Невозможно добавить пользователя в черный список '
+            'пока он присутствует в списке избранных'
+        elif add_to_db_black_list(search_id) is None:
+            message = ('Доступ к черному списку невозможен '
+                       'до тех пор пока не будет найден '
+                       'хотя бы один пользователь')
+        elif add_to_db_black_list(search_id) is False:
+            message = 'Пользователь уже был ранее добавлен в черный список'
         elif add_to_db_black_list(search_id):
             message = 'Пользователь добавлен в черный список'
-        else:
-            message = 'Пользователь уже был ранее добавлен в черный список'
         self.send_message(user_id, message=message)
 
     def show_black_list(self, user_id):
         """Отображаем анкеты в черном списке"""
         black_list = get_black_list()
-        message = ('В черном списке находятся {len(black_list)} '
+        message = (f'В черном списке находятся {len(black_list)} '
                    'анкет(а/ы).\n\n')
         self.send_message(user_id, message=message)
         if len(black_list) != 0:
@@ -313,8 +329,10 @@ class Vkinder:
             self.parse_users_search(user_id, users_search)
 
         message = ('Закончилось заполнение базы найденными анкетами.\n'
-                   'Можно начинать поиск')
+                   f'В базе находится {len(get_search_ids())} анкет(а/ы).\n'
+                   'Можете начинать поиск')
         self.send_message(user_id, message)
+        self.db_update_percent = 100
 
     def parse_users_search(self, user_id, users_search):
         """Заполняем/обновляем БД найденными подходящими анкетами"""
@@ -324,6 +342,7 @@ class Vkinder:
             if el['is_closed'] is False:
                 users_search_not_closed.append(el)
         # Найденные анкеты добавляем в БД
+        count_search_ids_before_adding = len(get_search_ids())
         for el in users_search_not_closed:
             first_name = el['first_name']
             last_name = el['last_name']
@@ -336,73 +355,78 @@ class Vkinder:
             search_id = create_row_in_search_table(first_name, last_name,
                                                    profile, top_url_photos)
             create_row_in_bot_search_table(search_id, user_id)
-        # Ниже 0.27 это результат деления 100 процентов на 365 дней в году
-        self.db_update_percent -= 0.27
-        count_search_ids = len(get_search_ids())
-        if count_search_ids != 0 and count_search_ids % 5 == 0:
-            message = (f'В базe уже есть {count_search_ids} найденных(ая)'
-                       f' анкет(а/ы).\nОсталось {self.db_update_percent:.2f}% '
+        # Ниже 0.274 это результат деления 100 процентов на 365 дней в году
+        self.db_update_percent -= 0.274
+        count_search_ids_after_adding = len(get_search_ids())
+        if count_search_ids_after_adding != count_search_ids_before_adding \
+                and count_search_ids_after_adding % 5 == 0:
+            message = (f'В базe уже есть {count_search_ids_after_adding} '
+                       f'найденных(ая) анкет(а/ы).\nОсталось '
+                       f'{self.db_update_percent:.1f}% '
                        'до конца заполнения базы.')
             self.send_message(user_id, message)
 
 
 if __name__ == '__main__':
     vkinder = Vkinder(GROUP_TOKEN)
-    register = False
     for event in vkinder.longpoll.listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
             response = event.text.lower()
-            welcome_message = ['привет', 'hi', 'hello', 'start', 'старт',
-                               'начать']
-            if response in welcome_message:
-                if register is True:
-                    message = 'Вы уже зарегистрированы'
+            if response and vkinder.register is False:
+                if vkinder.check_age(event.user_id) < 18:
+                    message = ('Вам отказано в регистрации, '
+                               'т.к. ваш возраст меньше 18 лет')
                     vkinder.send_message(event.user_id, message)
                 else:
-                    register = True
-                    vkinder.get_bot_info(event.user_id)
+                    vkinder.register = True
                     keyboard = vkinder.get_keyboard_for_main_menu()
-            elif not register:
-                message = ('Чтобы зарегистрироваться введите одну из '
-                           f'следующих команд:\n{", ".join(welcome_message)}')
-                vkinder.send_message(event.user_id, message)
+                    vkinder.get_bot_info(event.user_id, keyboard)
 
-            elif response == 'найти' and register:
+            elif response == 'найти':
+                vkinder.state = 'main_menu'
                 users_search = vkinder.search_button_response(event.user_id)
 
-            elif response == 'избранные(меню)' and register:
-                state = 'favourite_list'
+            elif response == 'избранные(меню)' and \
+                    vkinder.state == 'main_menu':
+                vkinder.state = 'favourite_list'
                 message = 'Вы в меню избранных'
-                keyboard = vkinder.get_keyboard_for_preferences(state)
+                keyboard = vkinder.get_keyboard_for_preferences()
                 vkinder.send_message(event.user_id, message, keyboard)
-            elif response == 'добавить в избранные':
+            elif response == 'добавить в избранные' and \
+                    vkinder.state == 'favourite_list':
                 vkinder.add_to_favourite_list(event.user_id, users_search)
-            elif response == 'удалить из избранных':
+            elif response == 'удалить из избранных' and \
+                    vkinder.state == 'favourite_list':
                 vkinder.ask_for_favourite_id_to_remove(event.user_id)
-            elif response == 'список избранных':
+            elif response == 'список избранных' and \
+                    vkinder.state == 'favourite_list':
                 vkinder.show_favourite_list(event.user_id)
 
-            elif response == 'черный список(меню)' and register:
-                state = 'black_list'
+            elif response == 'черный список(меню)' and \
+                    vkinder.state == 'main_menu':
+                vkinder.state = 'black_list'
                 message = 'Вы в меню черного списка'
-                keyboard = vkinder.get_keyboard_for_preferences(state)
+                keyboard = vkinder.get_keyboard_for_preferences()
                 vkinder.send_message(event.user_id, message, keyboard)
-            elif response == 'добавить в черный список':
+            elif response == 'добавить в черный список' and \
+                    vkinder.state == 'black_list':
                 vkinder.add_to_black_list(event.user_id, users_search)
-            elif response == 'удалить из черного списка':
+            elif response == 'удалить из черного списка' and \
+                    vkinder.state == 'black_list':
                 vkinder.ask_for_black_id_to_remove(event.user_id)
-            elif response == 'черный список':
+            elif response == 'черный список' and vkinder.state == 'black_list':
                 vkinder.show_black_list(event.user_id)
 
             elif response.isdigit():
-                if state == 'favourite_list':
-                    vkinder.remove_from_favourite_list(event.user_id,
-                                                       int(response))
-                else:
-                    vkinder.remove_from_black_list(event.user_id,
-                                                   int(response))
+                if vkinder.state == 'favourite_list':
+                    vkinder.remove_from_favourite_list(
+                        event.user_id, int(response))
+                elif vkinder.state == 'black_list':
+                    vkinder.remove_from_black_list(
+                        event.user_id, int(response))
 
             elif response == 'назад':
+                vkinder.state = 'main_menu'
                 message = 'Вы в главном меню'
                 keyboard = vkinder.get_keyboard_for_main_menu()
                 vkinder.send_message(event.user_id, message, keyboard)
