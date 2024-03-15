@@ -136,16 +136,19 @@ class Vkinder:
     def add_to_favourite_list(self, user_id, search_id):
         """Добавляем анкету в список избранных"""
         if check_if_user_in_black_list(search_id):
-            message = 'Невозможно добавить пользователя в список избранных '
-            'пока он присутствует в черном списке'
-        elif add_to_db_favourite_list(search_id) is None:
+            message = ('Невозможно добавить пользователя в список избранных '
+            'пока он присутствует в черном списке')
+            self.send_message(user_id, message=message)
+            return
+        favourite_list = add_to_db_favourite_list(search_id)
+        if favourite_list is None:
             message = ('Доступ к списку избранных невозможен '
                        'до тех пор пока не будет найден '
                        'хотя бы один пользователь')
-        elif add_to_db_favourite_list(search_id) is False:
-            message = 'Пользователь уже был ранее добавлен в список избранных'
-        elif add_to_db_favourite_list(search_id):
+        elif favourite_list:
             message = 'Пользователь добавлен в список избранных'
+        elif favourite_list is False:
+            message = 'Пользователь уже был ранее добавлен в список избранных'
         self.send_message(user_id, message=message)
 
     def show_favourite_list(self, user_id):
@@ -175,16 +178,19 @@ class Vkinder:
     def add_to_black_list(self, user_id, search_id):
         """Добавляем анкету в черный список"""
         if check_if_user_in_favourite_list(search_id):
-            message = 'Невозможно добавить пользователя в черный список '
-            'пока он присутствует в списке избранных'
-        elif add_to_db_black_list(search_id) is None:
+            message = ('Невозможно добавить пользователя в черный список '
+            'пока он присутствует в списке избранных')
+            self.send_message(user_id, message=message)
+            return
+        black_list = add_to_db_black_list(search_id)
+        if black_list is None:
             message = ('Доступ к черному списку невозможен '
                        'до тех пор пока не будет найден '
                        'хотя бы один пользователь')
-        elif add_to_db_black_list(search_id) is False:
-            message = 'Пользователь уже был ранее добавлен в черный список'
-        elif add_to_db_black_list(search_id):
+        elif black_list:
             message = 'Пользователь добавлен в черный список'
+        elif black_list is False:
+            message = 'Пользователь уже был ранее добавлен в черный список'
         self.send_message(user_id, message=message)
 
     def show_black_list(self, user_id):
