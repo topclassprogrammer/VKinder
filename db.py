@@ -145,25 +145,22 @@ def get_favourite_list():
 def check_if_user_in_favourite_list(search_id):
     """Проверяем есть ли в списке избранных предлагаемый пользователь в чате"""
     with Session() as session:
-        favourite_list_check = session.query(Search.is_in_favourite_list).filter(
-                Search.search_id == search_id).first()
+        favourite_list_check = session.query(Search.is_in_favourite_list). \
+            filter(Search.search_id == search_id).first()
     if favourite_list_check:
         return favourite_list_check[0]
-    else:
-        return None
 
 
 def add_to_db_favourite_list(search_id):
     """Добавляем пользователя в список избранных"""
     if not check_if_user_in_favourite_list(search_id):
         with Session() as session:
-            favourite_list_check = session.query(Search).filter(Search.search_id == search_id).update(
+            favourite_list_check = session.query(Search). \
+                filter(Search.search_id == search_id).update(
                 {'is_in_favourite_list': True})
             if favourite_list_check:
                 session.commit()
                 return True
-            else:
-                return None
     elif check_if_user_in_favourite_list(search_id):
         return False
 
@@ -181,15 +178,13 @@ def find_search_id_by_profile(profile):
 
 def remove_in_db_favourite_list(profile):
     """Удаляем пользователя из списка избранных"""
-    with Session() as session:
-        search_id = find_search_id_by_profile(profile)
-        if search_id:
+    search_id = find_search_id_by_profile(profile)
+    if search_id:
+        with Session() as session:
             session.query(Search).filter(Search.search_id == search_id[0]). \
                 update({'is_in_favourite_list': False})
             session.commit()
             return True
-        else:
-            return False
 
 
 def get_black_list():
@@ -208,36 +203,31 @@ def check_if_user_in_black_list(search_id):
                 Search.search_id == search_id).first()
     if black_list_check:
         return black_list_check[0]
-    else:
-        return None
 
 
 def add_to_db_black_list(search_id):
     """Добавляем пользователя в черный список"""
     if not check_if_user_in_black_list(search_id):
         with Session() as session:
-            black_list_check = session.query(Search).filter(Search.search_id == search_id).update(
-                {'is_in_black_list': True})
+            black_list_check = session.query(Search).filter(
+                Search.search_id == search_id). \
+                update({'is_in_black_list': True})
             if black_list_check:
                 session.commit()
                 return True
-            else:
-                return None
     elif check_if_user_in_black_list(search_id):
         return False
 
 
 def remove_in_db_black_list(profile):
     """Удаляем пользователя из черного списка"""
-    with Session() as session:
-        search_id = find_search_id_by_profile(profile)
-        if search_id:
+    search_id = find_search_id_by_profile(profile)
+    if search_id:
+        with Session() as session:
             session.query(Search).filter(Search.search_id == search_id[0]). \
                 update({'is_in_black_list': False})
             session.commit()
             return True
-        else:
-            return False
 
 
 engine = create_db()
