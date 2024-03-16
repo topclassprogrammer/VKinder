@@ -74,33 +74,35 @@ class Vkinder:
         self.send_message(bot_info['id'], welcome_message, keyboard)
 
     @staticmethod
-    def get_keyboard_for_main_menu():
-        """Клавиатура в главном меню бота"""
+    def get_keyboard(response):
         keyboard = VkKeyboard()
-        keyboard.add_button('Найти', color=VkKeyboardColor.PRIMARY)
-        keyboard.add_line()
-        keyboard.add_button('Избранные(меню)', color=VkKeyboardColor.PRIMARY)
-        keyboard.add_button('Черный список(меню)',
-                            color=VkKeyboardColor.PRIMARY)
-        return keyboard
-
-    def get_keyboard_for_preferences(self):
-        """Клавиатура в меню предпочтений бота"""
-        keyboard = VkKeyboard()
-        keyboard.add_button(
-            "Добавить в "
-            f"{'избранные' if self.state == 'favourite_list' else 'черный список'}",
-            color=VkKeyboardColor.POSITIVE)
-        keyboard.add_button(
-            "Удалить из "
-            f"{'избранных' if self.state == 'favourite_list' else 'черного списка'}",
-            color=VkKeyboardColor.NEGATIVE)
-        keyboard.add_line()
-        keyboard.add_button(
-            'Список избранных' if self.state == 'favourite_list' else 'Черный список',
-            color=VkKeyboardColor.PRIMARY)
-        keyboard.add_button('Назад', color=VkKeyboardColor.SECONDARY)
-        return keyboard
+        if response == 'избранные(меню)':
+            keyboard.add_button("Добавить в избранные",
+                                color=VkKeyboardColor.POSITIVE)
+            keyboard.add_button("Удалить из избранных",
+                                color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+            keyboard.add_button("Список избранных",
+                                color=VkKeyboardColor.PRIMARY)
+            keyboard.add_button('Назад', color=VkKeyboardColor.SECONDARY)
+            return keyboard
+        elif response == 'черный список(меню)':
+            keyboard.add_button("Добавить в черный список",
+                                color=VkKeyboardColor.POSITIVE)
+            keyboard.add_button("Удалить из черного списка",
+                                color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+            keyboard.add_button("Черный список", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_button('Назад', color=VkKeyboardColor.SECONDARY)
+            return keyboard
+        else:
+            keyboard.add_button('Найти', color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+            keyboard.add_button('Избранные(меню)',
+                                color=VkKeyboardColor.PRIMARY)
+            keyboard.add_button('Черный список(меню)',
+                                color=VkKeyboardColor.PRIMARY)
+            return keyboard
 
     @staticmethod
     def calculate_age(bdate):
@@ -137,14 +139,13 @@ class Vkinder:
         """Добавляем анкету в список избранных"""
         if check_if_user_in_black_list(search_id):
             message = ('Невозможно добавить пользователя в список избранных '
-            'пока он присутствует в черном списке')
+                       'пока он присутствует в черном списке')
             self.send_message(user_id, message=message)
             return
         favourite_list = add_to_db_favourite_list(search_id)
         if favourite_list is None:
-            message = ('Доступ к списку избранных невозможен '
-                       'до тех пор пока не будет найден '
-                       'хотя бы один пользователь')
+            message = ('Прежде чем кого-то добавить в список избранных, '
+                       'вам нужно сперва начать поиск пользователя')
         elif favourite_list:
             message = 'Пользователь добавлен в список избранных'
         elif favourite_list is False:
@@ -154,23 +155,35 @@ class Vkinder:
     def show_favourite_list(self, user_id):
         """Отображаем анкеты в списке избранных"""
         favourite_list = get_favourite_list()
-        message = (f'В списке избранных находятся {len(favourite_list)} '
-                   f'анкет(а/ы).\n\n')
-        self.send_message(user_id, message=message)
-        if len(favourite_list) != 0:
+        if len(favourite_list) == 0:
+            message = ('В списке избранных никого нет.\n\n')
+            self.send_message(user_id, message=message)
+        else:
+            message = (f'В списке избранных находятся {len(favourite_list)} '
+                       'анкет(а/ы).\n\n')
+            self.send_message(user_id, message=message)
             for el in favourite_list:
                 self.show_search_result(user_id, el)
 
     def ask_for_favourite_id_to_remove(self, user_id):
-        """Справшиваем какую анкету мы хотим удалить из списка избранных"""
-        message = ('Напишите цифрами id анкеты пользователя, '
-                   'которого вы хотите удалить из списка избранных')
+        """Спрашиваем какую анкету мы хотим удалить из списка избранных"""
+        if len(get_favourite_list()) == 0:
+            message = ('Вы не можете кого-либо удалить, '
+                       'т.к. список избранных пуст')
+        else:
+            message = ('Напишите цифрами id анкеты пользователя, '
+                       'которого вы хотите удалить из списка избранных')
         self.send_message(user_id, message)
 
     def remove_from_favourite_list(self, user_id, profile):
         """Удаляем анкету из списка избранных"""
-        if remove_in_db_favourite_list(profile):
+        res = remove_in_db_favourite_list(profile)
+        print('res', res)
+        if res:
             message = f'Анкета с id {profile} удалена из списка избранных'
+        elif res is False:
+            message = ('Вы не можете кого-либо удалить, '
+                       'т.к. список избранных пуст')
         else:
             message = f'Анкета с id {profile} не обнаружена в списке избранных'
         self.send_message(user_id, message=message)
@@ -179,14 +192,13 @@ class Vkinder:
         """Добавляем анкету в черный список"""
         if check_if_user_in_favourite_list(search_id):
             message = ('Невозможно добавить пользователя в черный список '
-            'пока он присутствует в списке избранных')
+                       'пока он присутствует в списке избранных')
             self.send_message(user_id, message=message)
             return
         black_list = add_to_db_black_list(search_id)
         if black_list is None:
-            message = ('Доступ к черному списку невозможен '
-                       'до тех пор пока не будет найден '
-                       'хотя бы один пользователь')
+            message = ('Прежде чем кого-то добавить в черный список, '
+                       'вам нужно сперва начать поиск пользователя')
         elif black_list:
             message = 'Пользователь добавлен в черный список'
         elif black_list is False:
@@ -196,23 +208,32 @@ class Vkinder:
     def show_black_list(self, user_id):
         """Отображаем анкеты в черном списке"""
         black_list = get_black_list()
-        message = (f'В черном списке находятся {len(black_list)} '
-                   'анкет(а/ы).\n\n')
-        self.send_message(user_id, message=message)
-        if len(black_list) != 0:
+        if len(black_list) == 0:
+            message = ('В черном списке никого нет.\n\n')
+            self.send_message(user_id, message=message)
+        else:
+            message = (f'В черном списке находятся {len(black_list)} '
+                       'анкет(а/ы).\n\n')
+            self.send_message(user_id, message=message)
             for el in black_list:
                 self.show_search_result(user_id, el)
 
     def ask_for_black_id_to_remove(self, user_id):
-        """Справшиваем какую анкету мы хотим удалить из черного списка"""
-        message = ('Напишите цифрами id анкеты пользователя, '
-                   'которого вы хотите удалить из черного списка')
+        """Спрашиваем какую анкету мы хотим удалить из черного списка"""
+        if len(get_black_list()) == 0:
+            message = ('Вы не можете кого-либо удалить, '
+                       'т.к. черный список пуст')
+        else:
+            message = ('Напишите цифрами id анкеты пользователя, '
+                       'которого вы хотите удалить из черного списка')
         self.send_message(user_id, message)
 
     def remove_from_black_list(self, user_id, profile):
         """Удаляем анкету из черного списка"""
         if remove_in_db_black_list(profile):
             message = f'Анкета с id {profile} удалена из черного списка'
+        elif remove_in_db_black_list(profile) is False:
+            message = 'Вы не можете кого-либо удалить, т.к. черный список пуст'
         else:
             message = f'Анкета с id {profile} не обнаружена в черном списке'
         self.send_message(user_id, message=message)
@@ -269,7 +290,7 @@ class Vkinder:
         self.next_birth_year = int(self.birth_year) + 1
         self.calendar = {
             1: 31,
-            2: 28 if self.current_year % 2 == 0 else range(1, 30),
+            2: 28 if self.current_year % 4 == 0 else range(1, 30),
             3: 31,
             4: 30,
             5: 31,
@@ -380,23 +401,27 @@ if __name__ == '__main__':
             response = event.text.lower()
             if response and vkinder.register is False:
                 if vkinder.check_age(event.user_id) < 18:
-                    message = ('Вам отказано в регистрации, '
+                    message = ('Вы не можете использовать бота, '
                                'т.к. ваш возраст меньше 18 лет')
                     vkinder.send_message(event.user_id, message)
                 else:
                     vkinder.register = True
-                    keyboard = vkinder.get_keyboard_for_main_menu()
+                    keyboard = vkinder.get_keyboard(response)
                     vkinder.get_bot_info(event.user_id, keyboard)
 
             elif response == 'найти':
                 vkinder.state = 'main_menu'
                 users_search = vkinder.search_button_response(event.user_id)
 
+            elif response == 'избранные(меню)' and not vkinder.state:
+                message = 'Вы должны сначала начать поиск ' \
+                          'прежде чем открывать меню избранных'
+                vkinder.send_message(event.user_id, message, keyboard)
             elif response == 'избранные(меню)' and \
                     vkinder.state == 'main_menu':
                 vkinder.state = 'favourite_list'
                 message = 'Вы в меню избранных'
-                keyboard = vkinder.get_keyboard_for_preferences()
+                keyboard = vkinder.get_keyboard(response)
                 vkinder.send_message(event.user_id, message, keyboard)
             elif response == 'добавить в избранные' and \
                     vkinder.state == 'favourite_list':
@@ -408,11 +433,15 @@ if __name__ == '__main__':
                     vkinder.state == 'favourite_list':
                 vkinder.show_favourite_list(event.user_id)
 
+            elif response == 'черный список(меню)' and not vkinder.state:
+                message = 'Вы должны сначала начать поиск ' \
+                          'прежде чем открывать меню черного списка'
+                vkinder.send_message(event.user_id, message, keyboard)
             elif response == 'черный список(меню)' and \
                     vkinder.state == 'main_menu':
                 vkinder.state = 'black_list'
                 message = 'Вы в меню черного списка'
-                keyboard = vkinder.get_keyboard_for_preferences()
+                keyboard = vkinder.get_keyboard(response)
                 vkinder.send_message(event.user_id, message, keyboard)
             elif response == 'добавить в черный список' and \
                     vkinder.state == 'black_list':
@@ -434,7 +463,7 @@ if __name__ == '__main__':
             elif response == 'назад':
                 vkinder.state = 'main_menu'
                 message = 'Вы в главном меню'
-                keyboard = vkinder.get_keyboard_for_main_menu()
+                keyboard = vkinder.get_keyboard(response)
                 vkinder.send_message(event.user_id, message, keyboard)
             else:
                 vkinder.send_message(event.user_id, 'Извините, не понял вас')
