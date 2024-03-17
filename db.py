@@ -46,8 +46,8 @@ def get_bot_update_time(profile):
     with Session() as session:
         bot_update_time = session.query(Bot.update_time). \
             filter(Bot.profile == profile).first()
-        if bot_update_time:
-            return bot_update_time[0]
+    if bot_update_time:
+        return bot_update_time[0]
 
 
 def check_if_update_needs(profile):
@@ -83,7 +83,8 @@ def get_search_ids():
             filter(Bot.bot_id == BotSearch.bot_id).all()
 
 
-def create_row_in_search_table(first_name, last_name, profile, top_url_photos):
+def create_row_in_search_table(first_name, last_name, profile,
+                               top_url_profile_photos, top_url_tagged_photos):
     """Добавляем в таблицу Search найденных пользователей на основании
     информации из анкеты пользователя бота"""
     with Session() as session:
@@ -91,12 +92,21 @@ def create_row_in_search_table(first_name, last_name, profile, top_url_photos):
             Search.search_id), [{
                 'first_name': first_name, 'last_name': last_name,
                 'profile': profile,
-                'photo_1': top_url_photos[0]
-                if len(top_url_photos) > 0 else None,
-                'photo_2': top_url_photos[1]
-                if len(top_url_photos) > 1 else None,
-                'photo_3': top_url_photos[2]
-                if len(top_url_photos) > 2 else None
+                'profile_photo_1': top_url_profile_photos[0]
+                if len(top_url_profile_photos) > 0 else None,
+                'profile_photo_2': top_url_profile_photos[1]
+                if len(top_url_profile_photos) > 1 else None,
+                'profile_photo_3': top_url_profile_photos[2]
+                if len(top_url_profile_photos) > 2 else None,
+                'tagged_photo_1': top_url_tagged_photos[0]
+                if top_url_tagged_photos is not None and
+                len(top_url_tagged_photos) > 0 else None,
+                'tagged_photo_2': top_url_tagged_photos[1]
+                if top_url_tagged_photos is not None and
+                len(top_url_tagged_photos) > 1 else None,
+                'tagged_photo_3': top_url_tagged_photos[2]
+                if top_url_tagged_photos is not None and
+                len(top_url_tagged_photos) > 2 else None
             }])
         session.commit()
         return search_row.fetchone()[0]
@@ -120,6 +130,13 @@ def get_random_search_id():
     return random_search_id
 
 
+def get_search_rows():
+    return Search.search_id, Search.first_name, Search.last_name, \
+           Search.profile, Search.profile_photo_1, Search.profile_photo_2, \
+           Search.profile_photo_3, Search.tagged_photo_1, \
+           Search.tagged_photo_2, Search.tagged_photo_3
+
+
 def get_random_search_row():
     """Получаем случайную запись, которой нет в черном списке,
     среди найденных пользователей"""
@@ -127,18 +144,14 @@ def get_random_search_row():
     while check_if_user_in_black_list(random_search_id):
         random_search_id = get_random_search_id()
     with Session() as session:
-        return session.query(Search.search_id, Search.first_name,
-                             Search.last_name, Search.profile, Search.photo_1,
-                             Search.photo_2, Search.photo_3).filter(
+        return session.query(*get_search_rows()).filter(
             Search.search_id == random_search_id).first()
 
 
 def get_favourite_list():
     """Получаем содержимое списка избранных"""
     with Session() as session:
-        return session.query(Search.search_id, Search.first_name,
-                             Search.last_name, Search.profile, Search.photo_1,
-                             Search.photo_2, Search.photo_3).filter(
+        return session.query(*get_search_rows()).filter(
             Search.is_in_favourite_list).all()
 
 
@@ -172,8 +185,8 @@ def find_search_id_by_profile(profile):
     with Session() as session:
         search_id = session.query(Search.search_id).filter(
             Search.profile == profile).first()
-        if search_id is not None and (search_id[0],) in search_ids:
-            return search_id
+    if search_id is not None and (search_id[0],) in search_ids:
+        return search_id
 
 
 def remove_in_db_favourite_list(profile):
@@ -190,9 +203,7 @@ def remove_in_db_favourite_list(profile):
 def get_black_list():
     """Получаем содержимое черного списка"""
     with Session() as session:
-        return session.query(Search.search_id, Search.first_name,
-                             Search.last_name, Search.profile, Search.photo_1,
-                             Search.photo_2, Search.photo_3).filter(
+        return session.query(*get_search_rows()).filter(
             Search.is_in_black_list).all()
 
 
@@ -200,7 +211,7 @@ def check_if_user_in_black_list(search_id):
     """Проверяем есть ли в черном списке предлагаемый пользователь в чате"""
     with Session() as session:
         black_list_check = session.query(Search.is_in_black_list).filter(
-                Search.search_id == search_id).first()
+            Search.search_id == search_id).first()
     if black_list_check:
         return black_list_check[0]
 
