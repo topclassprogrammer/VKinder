@@ -73,10 +73,11 @@ class Vkinder:
                            "нажмите на кнопку Найти")
         self.send_message(bot_info['id'], welcome_message, keyboard)
 
-    @staticmethod
-    def get_keyboard(response):
+    def get_keyboard(self, response):
         keyboard = VkKeyboard()
-        if response == 'избранные(меню)':
+        if self.state is None:
+            keyboard.add_button("Найти",  color=VkKeyboardColor.PRIMARY)
+        elif response == 'избранные(меню)':
             keyboard.add_button("Добавить в избранные",
                                 color=VkKeyboardColor.POSITIVE)
             keyboard.add_button("Удалить из избранных",
@@ -85,7 +86,6 @@ class Vkinder:
             keyboard.add_button("Список избранных",
                                 color=VkKeyboardColor.PRIMARY)
             keyboard.add_button('Назад', color=VkKeyboardColor.SECONDARY)
-            return keyboard
         elif response == 'черный список(меню)':
             keyboard.add_button("Добавить в черный список",
                                 color=VkKeyboardColor.POSITIVE)
@@ -94,7 +94,6 @@ class Vkinder:
             keyboard.add_line()
             keyboard.add_button("Черный список", color=VkKeyboardColor.PRIMARY)
             keyboard.add_button('Назад', color=VkKeyboardColor.SECONDARY)
-            return keyboard
         else:
             keyboard.add_button('Найти', color=VkKeyboardColor.PRIMARY)
             keyboard.add_line()
@@ -102,7 +101,7 @@ class Vkinder:
                                 color=VkKeyboardColor.PRIMARY)
             keyboard.add_button('Черный список(меню)',
                                 color=VkKeyboardColor.PRIMARY)
-            return keyboard
+        return keyboard
 
     @staticmethod
     def calculate_age(bdate):
@@ -117,10 +116,9 @@ class Vkinder:
         else:
             return "не указано"
 
-    @staticmethod
-    def get_top_liked_photos(user_id):
-        """Получаем URL трех фото из профиля анкеты,
-        имеющие наибольшее кол-во лайков"""
+    def get_top_profile_photos(self, user_id):
+        """Получаем URL трех фото, имеющие наибольшее кол-во лайков,
+        из профиля анкеты"""
         vk_session = vk_api.VkApi(token=USER_TOKEN)
         vk = vk_session.get_api()
         try:
@@ -129,6 +127,22 @@ class Vkinder:
                                             count=100, extended=1)
         except vk_api.exceptions.ApiError:
             return None
+        return self.get_top_photos(photos_response)
+
+    def get_top_tagged_photos(self, user_id):
+        """Получаем URL трех фото, имеющие наибольшее кол-во лайков,
+         из тех фотографий на которых отмечен пользователь"""
+        vk_session = vk_api.VkApi(token=USER_TOKEN)
+        vk = vk_session.get_api()
+        try:
+            photos_response = vk.photos.getUserPhotos(
+                user_id=user_id, count=1000, extended=1)
+        except vk_api.exceptions.ApiError:
+            return None
+        return self.get_top_photos(photos_response)
+
+    @staticmethod
+    def get_top_photos(photos_response):
         photos = photos_response['items']
         sorted_photos = sorted(photos, key=lambda x: -x['likes']['count'])
         top_photos = sorted_photos[:3]
@@ -178,7 +192,6 @@ class Vkinder:
     def remove_from_favourite_list(self, user_id, profile):
         """Удаляем анкету из списка избранных"""
         res = remove_in_db_favourite_list(profile)
-        print('res', res)
         if res:
             message = f'Анкета с id {profile} удалена из списка избранных'
         elif res is False:
@@ -260,7 +273,17 @@ class Vkinder:
             elif isinstance(el, str) and el.startswith('https://'):
                 photos.append(el)
         self.send_message(user_id, message=message)
-        self.send_photo_message(user_id, photos=photos)
+
+        message = 'Фото из профиля пользователя:\n'
+        self.send_message(user_id, message=message)
+        if photos is not None:
+            self.send_photo_message(user_id, photos=photos[:3])
+
+        if len(photos) > 3:
+            message = 'Фото на которых отмечен пользователь:\n'
+            self.send_message(user_id, message=message)
+            if photos is not None:
+                self.send_photo_message(user_id, photos=photos[3:])
         return search_row[0]
 
     def get_days_in_month(self, month):
@@ -290,7 +313,7 @@ class Vkinder:
         self.next_birth_year = int(self.birth_year) + 1
         self.calendar = {
             1: 31,
-            2: 28 if self.current_year % 4 == 0 else range(1, 30),
+            2: 28 if self.current_year % 4 == 0 else 29,
             3: 31,
             4: 30,
             5: 31,
@@ -308,7 +331,9 @@ class Vkinder:
         self.send_message(user_id, message)
 
         # Ниже идет итерирование по дням года в которых возраст
-        # пользователя бота равен возрасту искомого пользователя
+        # пользователя бота равен возрасту искомого пользователя, т.е.
+        # если пользователь, например, родился, 15.04.1990, то это период
+        # 15.04.1990-14.04.1991
 
         # От текущего дня до конца текущего месяца в год рождения
         remaining_days_in_current_month = range(
@@ -358,7 +383,8 @@ class Vkinder:
         message = ('Закончилось заполнение базы найденными анкетами.\n'
                    f'В базе находится {len(get_search_ids())} анкет(а/ы).\n'
                    'Можете начинать поиск')
-        self.send_message(user_id, message)
+        self.send_message(user_id, message,
+                          keyboard=self.get_keyboard(response))
         self.db_update_percent = 100
 
     def parse_users_search(self, user_id, users_search):
@@ -374,13 +400,16 @@ class Vkinder:
             first_name = el['first_name']
             last_name = el['last_name']
             profile = el['id']
-            top_url_photos = self.get_top_liked_photos(profile)
-            # Если в профиле всего одно фото и оно не кликабельно, то получить
-            # ссылку на фото не получится, поэтому такую анкету пропускаем
-            if not top_url_photos:
+            top_url_profile_photos = self.get_top_profile_photos(profile)
+            top_url_tagged_photos = self.get_top_tagged_photos(profile)
+            # Если в профиле всего одно фото, которое не кликабельно,
+            # то получить ссылку на фото не получится,
+            # поэтому такую анкету пропускаем
+            if not top_url_profile_photos:
                 continue
-            search_id = create_row_in_search_table(first_name, last_name,
-                                                   profile, top_url_photos)
+            search_id = create_row_in_search_table(
+                first_name, last_name, profile, top_url_profile_photos,
+                top_url_tagged_photos)
             create_row_in_bot_search_table(search_id, user_id)
         # Ниже 0.274 это результат деления 100 процентов на 365 дней в году
         self.db_update_percent -= 0.274
