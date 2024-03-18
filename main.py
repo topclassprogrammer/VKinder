@@ -12,7 +12,7 @@ from db import register_bot_user, create_row_in_search_table, \
     get_favourite_list, add_to_db_favourite_list, \
     remove_in_db_favourite_list, add_to_db_black_list, get_black_list, \
     remove_in_db_black_list, check_if_user_in_black_list, \
-    check_if_user_in_favourite_list
+    check_if_user_in_favourite_list, find_profile_by_search_id
 
 
 class Vkinder:
@@ -23,6 +23,7 @@ class Vkinder:
         self.db_update_percent = 100  # Отсчет от 100 до 0 при заполнении базы
         self.register = False  # Флаг регистрации в базе
         self.state = None  # Флаг нахождения бота в конкретном меню
+        self.first_search = None
 
     def send_message(self, user_id, message, keyboard=None):
         """Отправляем сообщение в чат"""
@@ -35,12 +36,11 @@ class Vkinder:
             self.vk.messages.send(user_id=user_id, message=message,
                                   random_id=random_id)
 
-    def send_photo_message(self, user_id, photos):
+    def send_photo_message(self, user_id, photo):
         """Отправляем фото в чат"""
-        for photo in photos:
-            random_id = uuid.uuid4().int
-            self.vk.messages.send(user_id=user_id, random_id=random_id,
-                                  attachment=photo)
+        random_id = uuid.uuid4().int
+        self.vk.messages.send(user_id=user_id, random_id=random_id,
+                              attachment=photo)
 
     def check_age(self, user_id):
         fields = ['sex', 'city', 'bdate']
@@ -96,6 +96,7 @@ class Vkinder:
             keyboard.add_button('Назад', color=VkKeyboardColor.SECONDARY)
         else:
             keyboard.add_button('Найти', color=VkKeyboardColor.PRIMARY)
+            keyboard.add_button('Лайк(поставить/убрать)', color=VkKeyboardColor.PRIMARY)
             keyboard.add_line()
             keyboard.add_button('Избранные(меню)',
                                 color=VkKeyboardColor.PRIMARY)
@@ -251,6 +252,59 @@ class Vkinder:
             message = f'Анкета с id {profile} не обнаружена в черном списке'
         self.send_message(user_id, message=message)
 
+    def find_item_id_by_profile_url(self, vk, profile, url):
+        try:
+            photos = vk.photos.get(owner_id=profile, album_id='profile', rev=1, count=1000, extended=1)
+        except vk_api.exceptions.ApiError:
+            return None
+        items = photos['items']
+        for item in items:
+            if item['sizes'][-1]['url'].split('userapi.com')[1] == url.split('userapi.com')[1]:
+                return item['id']
+
+    def find_item_id_by_tagged_url(self, vk, profile, url):
+        try:
+            photos = vk.photos.getUserPhotos(user_id=profile, count=1000, extended=1)
+        except vk_api.exceptions.ApiError:
+            return None
+        items = photos['items']
+        for item in items:
+            if item['sizes'][-1]['url'].split('userapi.com')[1] == url.split('userapi.com')[1]:
+                return item['id']
+
+    def add_like(self, users_search, photos_search, response):
+        vk_session = vk_api.VkApi(token=USER_TOKEN)
+        vk = vk_session.get_api()
+        profile = find_profile_by_search_id(users_search)
+        response = int(response)
+        url = photos_search.get(response)
+        if 1 <= response <= 3 and response in range(len(photos_search) + 1):
+            profile_item_id = self.find_item_id_by_profile_url(vk, profile, url)
+            islike = vk.likes.isLiked(owner_id=profile, type='photo', item_id=profile_item_id)
+            if islike['liked'] == 0:
+                vk.likes.add(owner_id=profile, type='photo', item_id=profile_item_id)
+                message = f'Фотографии с номером {response} поставлен лайк в профиле анкеты найденного пользователя'
+            else:
+                vk.likes.delete(owner_id=profile, type='photo', item_id=profile_item_id)
+                message = 'Лайк снят'
+        elif 4 <= response <= 6 and response in range(len(photos_search) + 1):
+            tagged_item_id = self.find_item_id_by_tagged_url(vk, profile, url)
+            try:
+                islike = vk.likes.isLiked(owner_id=profile, type='photo', item_id=tagged_item_id)
+                if islike['liked'] == 0:
+                    vk.likes.add(owner_id=profile, type='photo', item_id=tagged_item_id)
+                    message = f'Отмеченной фотографии с номером {response} поставлен лайк в анкете найденного пользователя'
+                else:
+                    vk.likes.delete(owner_id=profile, type='photo', item_id=tagged_item_id)
+                    message = 'Лайк снят'
+            except vk_api.exceptions.ApiError:
+                # Несмотря на то, что через веб-интерфейс vk.com удается поставить лайк некоторым отмеченным фото, то через API уже не получается сделать этого. Возможно это связано не только с ограничениями приватности анкеты, но и с особенностью работы текущей версии API
+                message = f'Не удалось поставить лайк, т.к. пользователь ограничил доступ к данному отмеченному фото настройками приватности'
+        else:
+            message = 'Вы указали неверный номер фотографии'
+
+        vkinder.send_message(event.user_id, message, keyboard=self.get_keyboard(response))
+
     def search_button_response(self, user_id):
         """Оценка события при нажатии на кнопку поиска"""
         if check_if_update_needs(user_id) or len(get_search_ids()) == 0:
@@ -262,29 +316,34 @@ class Vkinder:
     def show_search_result(self, user_id, search_row):
         """Отображаем результат среди найденных анкет пользователей в чат"""
         message = ''
-        photos = []
+        photos_dict = {}
+        for idx, el in enumerate(search_row[4:]):
+            if el is not None and el.startswith('https://'):
+                photos_dict.setdefault(idx + 1, el)
         for el in search_row[1:]:
             if isinstance(el, str) and not el.startswith('https://'):
                 message += f'{el} '
             elif isinstance(el, int):
                 message = message.strip()
                 message += f'\nvk.com/id{el}\n'
-            # Проверяем случай, когда у пользователя меньше трех фото в профиле
-            elif isinstance(el, str) and el.startswith('https://'):
-                photos.append(el)
         self.send_message(user_id, message=message)
 
         message = 'Фото из профиля пользователя:\n'
         self.send_message(user_id, message=message)
-        if photos is not None:
-            self.send_photo_message(user_id, photos=photos[:3])
-
-        if len(photos) > 3:
+        for key, value in photos_dict.items():
+            if key <= 3 and value is not None:
+                message = f'{key}:'
+                self.send_message(user_id, message=message)
+                self.send_photo_message(user_id, photo=value)
+        if len(photos_dict) > 3:
             message = 'Фото на которых отмечен пользователь:\n'
             self.send_message(user_id, message=message)
-            if photos is not None:
-                self.send_photo_message(user_id, photos=photos[3:])
-        return search_row[0]
+            for key, value in photos_dict.items():
+                if key > 3 and value is not None:
+                    message = f'{key}:'
+                    self.send_message(user_id, message=message)
+                    self.send_photo_message(user_id, photo=value)
+        return search_row[0], photos_dict
 
     def get_days_in_month(self, month):
         """Определяем сколько дней не в текущем месяце для итерации
@@ -440,18 +499,35 @@ if __name__ == '__main__':
 
             elif response == 'найти':
                 vkinder.state = 'main_menu'
-                users_search = vkinder.search_button_response(event.user_id)
+                search = vkinder.search_button_response(event.user_id)
+                if search is None:
+                    continue
+                else:
+                    vkinder.first_search = True
+                    users_search = search[0]  # int
+                    photos_search = search[1]  # dict
 
-            elif response == 'избранные(меню)' and not vkinder.state:
+            elif response == 'избранные(меню)' and not vkinder.first_search:
                 message = 'Вы должны сначала начать поиск ' \
                           'прежде чем открывать меню избранных'
+                keyboard = vkinder.get_keyboard(response='найти')
                 vkinder.send_message(event.user_id, message, keyboard)
             elif response == 'избранные(меню)' and \
-                    vkinder.state == 'main_menu':
+                    vkinder.state == 'main_menu' and vkinder.first_search:
                 vkinder.state = 'favourite_list'
                 message = 'Вы в меню избранных'
                 keyboard = vkinder.get_keyboard(response)
                 vkinder.send_message(event.user_id, message, keyboard)
+
+            elif response == 'лайк(поставить/убрать)' and vkinder.state and not vkinder.first_search:
+                vkinder.state = 'like'
+                message = 'Вы должны сначала начать поиск прежде чем ставить лайк'
+                vkinder.send_message(event.user_id, message)
+            elif response == 'лайк(поставить/убрать)' and vkinder.state and vkinder.first_search:
+                vkinder.state = 'like'
+                message = 'Из предложенных фото напишите цифрой какой фотографии вы хотите поставить/убрать лайк'
+                vkinder.send_message(event.user_id, message)
+
             elif response == 'добавить в избранные' and \
                     vkinder.state == 'favourite_list':
                 vkinder.add_to_favourite_list(event.user_id, users_search)
@@ -462,12 +538,13 @@ if __name__ == '__main__':
                     vkinder.state == 'favourite_list':
                 vkinder.show_favourite_list(event.user_id)
 
-            elif response == 'черный список(меню)' and not vkinder.state:
+            elif response == 'черный список(меню)' and not vkinder.first_search:
+                keyboard = vkinder.get_keyboard(response='найти')
                 message = 'Вы должны сначала начать поиск ' \
                           'прежде чем открывать меню черного списка'
                 vkinder.send_message(event.user_id, message, keyboard)
             elif response == 'черный список(меню)' and \
-                    vkinder.state == 'main_menu':
+                    vkinder.state == 'main_menu' and vkinder.first_search:
                 vkinder.state = 'black_list'
                 message = 'Вы в меню черного списка'
                 keyboard = vkinder.get_keyboard(response)
@@ -481,13 +558,16 @@ if __name__ == '__main__':
             elif response == 'черный список' and vkinder.state == 'black_list':
                 vkinder.show_black_list(event.user_id)
 
-            elif response.isdigit():
+            elif response.isdigit() and vkinder.state != 'main_menu':
                 if vkinder.state == 'favourite_list':
                     vkinder.remove_from_favourite_list(
                         event.user_id, int(response))
                 elif vkinder.state == 'black_list':
                     vkinder.remove_from_black_list(
                         event.user_id, int(response))
+                elif vkinder.state == 'like':
+                    vkinder.add_like(users_search, photos_search, response)
+                    vkinder.state = 'main_menu'
 
             elif response == 'назад':
                 vkinder.state = 'main_menu'
