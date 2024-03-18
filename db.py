@@ -131,10 +131,11 @@ def get_random_search_id():
 
 
 def get_search_rows():
+    """Получение столбцов таблицы Search для использования в других запросах"""
     return Search.search_id, Search.first_name, Search.last_name, \
-           Search.profile, Search.profile_photo_1, Search.profile_photo_2, \
-           Search.profile_photo_3, Search.tagged_photo_1, \
-           Search.tagged_photo_2, Search.tagged_photo_3
+        Search.profile, Search.profile_photo_1, Search.profile_photo_2, \
+        Search.profile_photo_3, Search.tagged_photo_1, \
+        Search.tagged_photo_2, Search.tagged_photo_3
 
 
 def get_random_search_row():
@@ -176,6 +177,13 @@ def add_to_db_favourite_list(search_id):
                 return True
     elif check_if_user_in_favourite_list(search_id):
         return False
+
+
+def find_profile_by_search_id(search_id):
+    with Session() as session:
+        res = session.query(Search.profile).filter(Search.search_id == search_id).first()
+        if res:
+            return res[0]
 
 
 def find_search_id_by_profile(profile):
