@@ -68,7 +68,8 @@ def update_bot_and_search(sex, age, city_id, profile):
             session.query(Bot).filter(Bot.profile == profile).update(
                 {'sex': sex, 'age': age, 'city_id': city_id,
                  'update_time': current_datetime})
-            search_ids = [el[0] for el in get_search_ids()]
+        search_ids = [el[0] for el in get_search_ids()]
+        with Session() as session:
             session.query(Search).filter(
                 Search.search_id.in_(search_ids)).delete()
             session.commit()
@@ -131,7 +132,7 @@ def get_random_search_id():
 
 
 def get_search_rows():
-    """Получение столбцов таблицы Search для использования в других запросах"""
+    """Получение строки из таблицы Search"""
     return Search.search_id, Search.first_name, Search.last_name, \
         Search.profile, Search.profile_photo_1, Search.profile_photo_2, \
         Search.profile_photo_3, Search.tagged_photo_1, \
@@ -179,14 +180,16 @@ def add_to_db_favourite_list(search_id):
         return False
 
 
-def find_profile_by_search_id(search_id):
+def get_profile_by_search_id(search_id):
+    """Находим ID анкеты VK по первичному ключу search_id"""
     with Session() as session:
-        res = session.query(Search.profile).filter(Search.search_id == search_id).first()
-        if res:
-            return res[0]
+        profile = session.query(Search.profile).filter(
+            Search.search_id == search_id).first()
+        if profile:
+            return profile[0]
 
 
-def find_search_id_by_profile(profile):
+def get_search_id_by_profile(profile):
     """Находим по ID анкете среди найденных пользователей в этой же таблице
      соответствующий ему первичный ключ"""
     search_ids = get_search_ids()
@@ -199,7 +202,7 @@ def find_search_id_by_profile(profile):
 
 def remove_in_db_favourite_list(profile):
     """Удаляем пользователя из списка избранных"""
-    search_id = find_search_id_by_profile(profile)
+    search_id = get_search_id_by_profile(profile)
     if search_id:
         with Session() as session:
             session.query(Search).filter(Search.search_id == search_id[0]). \
@@ -240,7 +243,7 @@ def add_to_db_black_list(search_id):
 
 def remove_in_db_black_list(profile):
     """Удаляем пользователя из черного списка"""
-    search_id = find_search_id_by_profile(profile)
+    search_id = get_search_id_by_profile(profile)
     if search_id:
         with Session() as session:
             session.query(Search).filter(Search.search_id == search_id[0]). \
