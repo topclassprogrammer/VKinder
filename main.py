@@ -132,7 +132,7 @@ class Vkinder:
         try:
             photos_response = vk.photos.get(owner_id=user_id,
                                             album_id='profile', rev=1,
-                                            count=100, extended=1)
+                                            count=1000, extended=1)
         except vk_api.exceptions.ApiError:
             return None
         return self.get_top_photos(photos_response)
@@ -496,7 +496,7 @@ class Vkinder:
                 and count_search_ids_after_adding % 5 == 0:
             message = (f'В базe уже есть {count_search_ids_after_adding} '
                        f'найденных(ая) анкет(а/ы).\nОсталось '
-                       f'{self.db_update_percent:.1f}% '
+                       f'{abs(self.db_update_percent):.1f}% '
                        'до конца заполнения базы.')
             self.send_message(user_id, message)
 
